@@ -22,38 +22,50 @@
  */
 declare(ticks = 1);
 require_once 'HTTPServer.php';
-require_once 'flexihash/include/init.php';
-require_once 'Zend/Registry.php';
-
-$hash = new Flexihash();
-
-$servers = array();
-$servers[] = 'http://127.0.0.1:1234/';
-$servers[] = 'http://127.0.0.1:1235/';
-$servers[] = 'http://127.0.0.1:1236/';
-
-Zend_Registry::set('hash', new Flexihash());
-Zend_Registry::get('hash')->addTargets($servers);
-
-Zend_Registry::set('self', 'http://127.0.0.1:1234/');
 
 class KeyServer
 {
-    public static function hasKey($key)
+    protected $_key;
+    protected $_fileHandle;
+    protected $_lockFile;
+
+
+    public function __construct($key)
     {
-        if (file_exists('sessions/'.$key)) {
-            return true;
+        $this->_key = $key;
+        $this->_lockFile = 'data/locks/'.$key;
+    }
+
+    public function lock()
+    {
+        $lockID = sha1(rand(0,99999).microtime(true));
+        do {
+            $this->_fileHandle = @fopen($this->_lockFile, 'x');
+            if ($this->_fileHandle === false) {
+                usleep(rand(5000,10000));
+            }
+        } while ($this->_fileHandle === false);
+
+        if (fwrite($this->_fileHandle, $lockID) === false) {
+            unlink($this->_lockFile);
+            // recursively try again? this could cause problems....
+            usleep(rand(5000,10000));
+            return $this->lock();
         } else {
-            return false;
+            return $lockID;
         }
     }
 
-    public static function lock($key)
+    public function unlock($lockID)
     {
-        $fh = fopen('sessions/'.$key, 'r+');
-        flock($fh, LOCK_EX); // waiting for exclusive lock
+        if (file_exists($this->_lockFile)) {
+            if (file_get_contents($this->_lockFile) === $lockID) {
+                unlink($this->_lockFile);
+                return true;
+            }
+        }
+        return false;
     }
-
 }
 
 class Handler extends HTTPServerHandler
@@ -71,26 +83,23 @@ class Handler extends HTTPServerHandler
         // Build the 'real' key name
         $key = $path[1].'::'.$path[2];
 
-        $servers = Zend_Registry::get('hash')->lookupList($key, 2);
-        if (!in_array(Zend_Registry::get('self'), $servers)) {
-            // The key DOESN'T belong on this server
-            $response = $this->makeResponse('Not on this server!');
+        // acquire lock
+        echo microtime(true) . " {$method}: {$key}\n";
+        $keyHandler = new KeyServer($key);
+        if ($method == 'GET') {
+            $lockID = $keyHandler->lock($key);
+            $response = $this->makeResponse('Lock ID acquired: '.$lockID);
             return $response;
-        } else {
-            // The key DOES belong on this server
-            if (KeyServer::hasKey($key)) {
-                $response = $this->makeResponse('Key located!');
-                return $response;
+        } else if ($method == 'POST') {
+            $lockID = trim($body);
+            $result = $keyHandler->unlock($lockID);
+            if ($result == true) {
+                $response = $this->makeResponse('Lock ID released: '.$lockID);
             } else {
-                // We need to create it
-
-                $response = $this->makeResponse('Key NOT located!');
-                return $response;
+                $response = $this->makeResponse('Unable to relase lock ID: '.$lockID);
             }
+            return $response;
         }
-        echo "{$method}: {$key}->{$server}\n";
-        $response = $this->makeResponse(microtime(true). ' '.$method);
-        return $response;
     }
 }
 
