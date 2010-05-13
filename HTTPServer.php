@@ -54,7 +54,7 @@ class HTTPServer
 
         while ($this->_isListening)
         {
-            $connection = @stream_socket_accept($this->_sock, 0);
+            $connection = @stream_socket_accept($this->_sock, 1);
             if ($connection === false) {
                 // nothing to do
             } elseif ($connection > 0) {
@@ -63,7 +63,7 @@ class HTTPServer
                 echo "error";
                 exit();
             }
-            usleep(250);
+            //usleep(250);
         }
     }
 
@@ -79,12 +79,32 @@ class HTTPServer
             /* child process */
             $this->_isListening = false;
             fclose($ssock);
-            $buffer = '';
-            while(!preg_match('/\r?\n\r?\n/', $buffer)) {
-                $buffer .= fread($csock, 2046);
+            $request = '';
+            while(!preg_match('/\r?\n\r?\n/', $request)) {
+                $request .= fread($csock, 2046);
             }
-            echo "\nCHILD PID: ".getmypid()."\n";
-            $response = $this->_class->interact($buffer);
+
+            $break = strpos($request, "\r\n\r\n");
+            $headers = substr($request, 0, $break);
+            $body = substr($request, $break);
+
+            $headers = explode("\r\n", $headers);
+            $request = array_shift($headers);
+            foreach($headers as $key=>$header){
+                $thisHeader = explode(': ', $header);
+                unset($headers[$key]);
+                $headers[$thisHeader[0]] = $thisHeader[1];
+            }
+
+            $firstSpace = strpos($request, ' ');
+            $offset = $firstSpace + 1;
+            $length = strpos($request, ' ', $offset) - $offset;
+
+            $method = strtoupper(substr($request, 0, $firstSpace));
+            $path = substr($request, $offset, $length);
+
+            $response = $this->_class->interact($method, $path, $headers, $body);
+
             fputs($csock, $response);
             fclose($csock);
         } else {
@@ -98,6 +118,7 @@ class HTTPServer
         {
             case SIGTERM:
             case SIGINT:
+                echo "exiting on user request\n";
                 exit();
             break;
 
@@ -105,5 +126,23 @@ class HTTPServer
                 pcntl_waitpid(-1, $status);
             break;
         }
+    }
+}
+
+abstract class HTTPServerHandler
+{
+    abstract public function interact($method, $path, $headers, $body);
+
+    public function makeResponse($string)
+    {
+        $nl = "\r\n";
+        $resp  = 'HTTP/1.0 200 OK' . $nl;
+		$resp .= 'Date: ' . gmdate('D, d M Y H:i:s T') . $nl;
+		$resp .= 'Server: sesserve/0.0.1' . $nl;
+		$resp .= 'Content-Type: text/html' . $nl;
+		$resp .= 'Content-Length: ' . strlen($string) . $nl;
+		$resp .= 'Connection: Close' . $nl . $nl;
+        $resp .= $string;
+        return $resp;
     }
 }

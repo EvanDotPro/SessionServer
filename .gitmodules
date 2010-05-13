@@ -1,0 +1,3 @@
+[submodule "flexihash"]
+	path = flexihash
+	url = ./flexihash
