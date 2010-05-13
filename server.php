@@ -28,12 +28,14 @@ class KeyServer
     protected $_key;
     protected $_fileHandle;
     protected $_lockFile;
+    protected $_dataFile;
 
 
     public function __construct($key)
     {
         $this->_key = $key;
         $this->_lockFile = 'data/locks/'.$key;
+        $this->_dataFile = 'data/'.$key;
     }
 
     public function lock()
@@ -66,6 +68,26 @@ class KeyServer
         }
         return false;
     }
+
+    public function read()
+    {
+        if (!file_exists($this->_dataFile)) {
+            touch($this->_dataFile);
+        }
+        return file_get_contents($this->_dataFile);
+    }
+
+    public function write($lockID, $data)
+    {
+        if (!file_exists($this->_lockFile) || file_get_contents($this->_lockFile) !== $lockID) {
+            return false;
+        }
+        if (!file_exists($this->_dataFile)) {
+            touch($this->_dataFile);
+        }
+        file_put_contents($this->_dataFile, $data);
+        return true;
+    }
 }
 
 class Handler extends HTTPServerHandler
@@ -87,11 +109,22 @@ class Handler extends HTTPServerHandler
         echo microtime(true) . " {$method}: {$key}\n";
         $keyHandler = new KeyServer($key);
         if ($method == 'GET') {
+            // wait until we acquire a lock
             $lockID = $keyHandler->lock($key);
-            $response = $this->makeResponse('Lock ID acquired: '.$lockID);
+            $header = array('X-Lock-ID' => $lockID);
+            $response = $this->makeResponse($keyHandler->read(), $header);
             return $response;
         } else if ($method == 'POST') {
-            $lockID = trim($body);
+            $lockID = $headers['X-Lock-ID'];
+            $result = $keyHandler->write($lockID, $body);
+            if ($result == true) {
+                $response = $this->makeResponse('1');
+            } else {
+                $response = $this->makeResponse('0');
+            }
+            return $response;
+        } else if ($method == 'UNLOCK') {
+            $lockID = $headers['X-Lock-ID'];
             $result = $keyHandler->unlock($lockID);
             if ($result == true) {
                 $response = $this->makeResponse('Lock ID released: '.$lockID);

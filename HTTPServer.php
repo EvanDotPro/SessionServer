@@ -133,13 +133,18 @@ abstract class HTTPServerHandler
 {
     abstract public function interact($method, $path, $headers, $body);
 
-    public function makeResponse($string)
+    public function makeResponse($string, $headers = false)
     {
         $nl = "\r\n";
         $resp  = 'HTTP/1.0 200 OK' . $nl;
 		$resp .= 'Date: ' . gmdate('D, d M Y H:i:s T') . $nl;
 		$resp .= 'Server: sesserve/0.0.1' . $nl;
-		$resp .= 'Content-Type: text/html' . $nl;
+        $resp .= 'Content-Type: text/html' . $nl;
+        if (is_array($headers)) {
+            foreach ($headers as $name => $value) {
+                $resp .= $name.': '.$value.$nl;
+            }
+        }
 		$resp .= 'Content-Length: ' . strlen($string) . $nl;
 		$resp .= 'Connection: Close' . $nl . $nl;
         $resp .= $string;
