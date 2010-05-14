@@ -116,7 +116,8 @@ class Handler extends HTTPServerHandler
             return $response;
         } else if ($method == 'POST') {
             $lockID = $headers['X-Lock-ID'];
-            $result = $keyHandler->write($lockID, $body);
+            //echo "\nBODY: ".trim($body)."\n";
+            $result = $keyHandler->write($lockID, trim($body));
             if ($result == true) {
                 $response = $this->makeResponse('1');
             } else {
